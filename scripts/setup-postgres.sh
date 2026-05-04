@@ -125,11 +125,9 @@ PGPASSWORD="${PG_ADMIN_PASSWORD}" psql \
     -v ON_ERROR_STOP=1 -t -A -c \
     "SELECT table_name FROM information_schema.tables WHERE table_schema='observability' ORDER BY table_name;" \
     | tee /tmp/obs-tables.txt
-expected="external_calls
-metric_samples
-runs"
-got="$(cat /tmp/obs-tables.txt | grep -v '^$' || true)"
-# v_runs_24h is a view, listed separately; just check the tables.
+got="$(grep -v '^$' /tmp/obs-tables.txt || true)"
+# Expected tables: runs, metric_samples, external_calls.
+# (v_runs_24h is a view, listed separately by \dv — not checked here.)
 if [[ "${got}" != *"runs"* || "${got}" != *"metric_samples"* || "${got}" != *"external_calls"* ]]; then
     echo "ERROR: expected tables not found." >&2
     exit 1
