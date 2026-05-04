@@ -33,7 +33,20 @@
 
 set -euo pipefail
 
-: "${PG_HOST:?PG_HOST must be set (POSTGRESFQDN from deploy output)}"
+# --------------------------------------------------------------------------
+# Auto-source .env from the repo root if any required var is still unset
+# after the operator's own export. deploy.sh writes PG_HOST into .env after
+# a successful deploy, so a fresh terminal session can pick it up without a
+# manual `source` step.
+# --------------------------------------------------------------------------
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+env_file="${repo_root}/.env"
+if [[ -f "${env_file}" ]] && [[ -z "${PG_HOST:-}" || -z "${PG_ADMIN_PASSWORD:-}" ]]; then
+    echo "→ Auto-loading ${env_file}"
+    set -a; source "${env_file}"; set +a
+fi
+
+: "${PG_HOST:?PG_HOST must be set. Run deploy.sh first (it writes PG_HOST into .env), or export PG_HOST=<your-server>.postgres.database.azure.com}"
 : "${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD must be set (same value used in deploy.sh)}"
 : "${OBS_WRITER_PASSWORD:?OBS_WRITER_PASSWORD must be set in .env}"
 : "${OBS_READER_PASSWORD:?OBS_READER_PASSWORD must be set in .env}"
