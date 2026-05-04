@@ -17,7 +17,7 @@ jobs:
     name: Bicep build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Bicep CLI
         run: |
@@ -47,7 +47,7 @@ jobs:
     name: ShellCheck deploy script
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run shellcheck on scripts/
         uses: ludeeus/action-shellcheck@2.0.0
         with:
