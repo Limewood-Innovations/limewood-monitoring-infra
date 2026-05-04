@@ -86,6 +86,7 @@ echo "→ Creating schema + ${OBS_WRITER_USERNAME} / ${OBS_READER_USERNAME} role
 PGPASSWORD="${PG_ADMIN_PASSWORD}" psql \
     "host=${PG_HOST} port=5432 user=${PG_ADMIN_USERNAME} dbname=${PG_DATABASE} sslmode=require" \
     -v ON_ERROR_STOP=1 \
+    -v db_name="${PG_DATABASE}" \
     -v writer_user="${OBS_WRITER_USERNAME}" \
     -v writer_pwd="${OBS_WRITER_PASSWORD}" \
     -v reader_user="${OBS_READER_USERNAME}" \
@@ -94,38 +95,38 @@ PGPASSWORD="${PG_ADMIN_PASSWORD}" psql \
 
 CREATE SCHEMA IF NOT EXISTS observability;
 
--- Writer role (idempotent: create or update password)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'writer_user') THEN
-        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', :'writer_user', :'writer_pwd');
-    ELSE
-        EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', :'writer_user', :'writer_pwd');
-    END IF;
-END$$;
+-- Note: psql `:` variable substitution works only in plain SQL, NOT inside
+-- `DO $$ … $$` blocks (those are server-side, psql doesn't see into them).
+-- We therefore use `\if` + `EXISTS(...)::int` for idempotent CREATE/ALTER.
 
-EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'writer_user');
-GRANT USAGE   ON SCHEMA observability TO :"writer_user";
+-- ---- Writer role -----------------------------------------------------
+SELECT (EXISTS(SELECT 1 FROM pg_roles WHERE rolname = :'writer_user'))::int AS writer_exists \gset
+\if :writer_exists
+ALTER ROLE :"writer_user" WITH PASSWORD :'writer_pwd';
+\else
+CREATE ROLE :"writer_user" LOGIN PASSWORD :'writer_pwd';
+\endif
+
+GRANT CONNECT ON DATABASE :"db_name" TO :"writer_user";
+GRANT USAGE ON SCHEMA observability TO :"writer_user";
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA observability TO :"writer_user";
-GRANT USAGE   ON ALL SEQUENCES IN SCHEMA observability TO :"writer_user";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA observability TO :"writer_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA observability
     GRANT SELECT, INSERT, UPDATE ON TABLES TO :"writer_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA observability
     GRANT USAGE ON SEQUENCES TO :"writer_user";
 
--- Reader role
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'reader_user') THEN
-        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', :'reader_user', :'reader_pwd');
-    ELSE
-        EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', :'reader_user', :'reader_pwd');
-    END IF;
-END$$;
+-- ---- Reader role -----------------------------------------------------
+SELECT (EXISTS(SELECT 1 FROM pg_roles WHERE rolname = :'reader_user'))::int AS reader_exists \gset
+\if :reader_exists
+ALTER ROLE :"reader_user" WITH PASSWORD :'reader_pwd';
+\else
+CREATE ROLE :"reader_user" LOGIN PASSWORD :'reader_pwd';
+\endif
 
-EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'reader_user');
-GRANT USAGE   ON SCHEMA observability TO :"reader_user";
-GRANT SELECT  ON ALL TABLES IN SCHEMA observability TO :"reader_user";
+GRANT CONNECT ON DATABASE :"db_name" TO :"reader_user";
+GRANT USAGE ON SCHEMA observability TO :"reader_user";
+GRANT SELECT ON ALL TABLES IN SCHEMA observability TO :"reader_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA observability
     GRANT SELECT ON TABLES TO :"reader_user";
 
