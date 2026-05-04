@@ -1,6 +1,6 @@
 // Workspace-based Application Insights — the single hot-path sink for all
 // 24 Alpenland tools. Each tool sets APPINSIGHTS_CONNECTION_STRING in its
-// .env / Function-App config and the alpenland-observability library does
+// .env / Function-App config and the limewood-observability library does
 // the rest.
 
 @description('Resource name.')

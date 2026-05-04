@@ -1,6 +1,6 @@
-# alpenland-monitoring-infra
+# limewood-monitoring-infra
 
-[![ci](https://github.com/Limewood-Innovations/alpenland-monitoring-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/Limewood-Innovations/alpenland-monitoring-infra/actions/workflows/ci.yml)
+[![ci](https://github.com/Limewood-Innovations/limewood-monitoring-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/Limewood-Innovations/limewood-monitoring-infra/actions/workflows/ci.yml)
 
 Bicep IaC for the shared Alpenland observability stack:
 
@@ -8,7 +8,7 @@ Bicep IaC for the shared Alpenland observability stack:
   metrics, and dependencies.
 - **Application Insights** (workspace-based) — per-tenant connection string
   consumed by all 24 Alpenland tools via the
-  [`alpenland-observability`](https://github.com/Limewood-Innovations/alpenland-observability)
+  [`limewood-observability`](https://github.com/Limewood-Innovations/limewood-observability)
   Python library.
 - **Action Group** — wires Azure Monitor alerts into the existing OpsGenie
   on-call rotation.
@@ -42,7 +42,7 @@ scripts/
 ./scripts/deploy.sh prod
 ```
 
-Each invocation creates / updates resource group `alpenland-observability-{env}-rg`
+Each invocation creates / updates resource group `limewood-observability-{env}-rg`
 and the resources inside. Idempotent: re-running on an unchanged template is a
 no-op.
 
@@ -56,7 +56,7 @@ LOG_ANALYTICS_WORKSPACE_ID=/subscriptions/.../workspaces/alpenland-obs-prod
 ```
 
 These are the values to paste into each tool's `.env` (or k8s/Function-App
-config) so the `alpenland-observability` library knows where to ship telemetry.
+config) so the `limewood-observability` library knows where to ship telemetry.
 
 ## Cost cap
 
@@ -69,5 +69,5 @@ config) so the `alpenland-observability` library knows where to ship telemetry.
 | prod  | 5 GB      | Sized for ~25 tools × ~10 MB/d telemetry headroom |
 
 Drop behaviour: once the cap is hit, AppInsights silently discards new
-events until the next UTC day. The `alpenland-observability` library emits
+events until the next UTC day. The `limewood-observability` library emits
 a single WARN log line on each drop so debugging is still possible.

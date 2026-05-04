@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the alpenland-monitoring-infra Bicep stack.
+# Deploy the limewood-monitoring-infra Bicep stack.
 # Usage:  ./scripts/deploy.sh <env>          # env in {dev, stage, prod}
 #         ./scripts/deploy.sh <env> --whatif # dry-run (preview only)
 #
@@ -15,10 +15,10 @@ if [[ -z "${env}" || ! "${env}" =~ ^(dev|stage|prod)$ ]]; then
     exit 1
 fi
 
-if [[ -z "${OPSGENIE_WEBHOOK_URL:-}" ]]; then
-    echo "ERROR: OPSGENIE_WEBHOOK_URL env var must be set." >&2
-    exit 1
-fi
+: "${OPSGENIE_WEBHOOK_URL:?OPSGENIE_WEBHOOK_URL must be set}"
+: "${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD must be set (Postgres SQL admin)}"
+: "${PG_AAD_ADMIN_OBJECT_ID:?PG_AAD_ADMIN_OBJECT_ID must be set (the AAD principal that becomes Postgres AAD admin)}"
+: "${PG_AAD_ADMIN_NAME:?PG_AAD_ADMIN_NAME must be set (display name of the AAD admin)}"
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 template="${repo_root}/bicep/main.bicep"
