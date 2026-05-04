@@ -9,6 +9,9 @@ Bicep IaC for the **shared** Alpenland observability stack:
   all 24 Alpenland tools via the
   [`limewood-observability`](https://github.com/Limewood-Innovations/limewood-observability)
   Python library.
+- **KeyVault** — single shared vault `alpenland-obs-shared-kv` holding the
+  AppInsights connection string + the 3 Postgres connection-string secrets.
+  Tools resolve them at runtime via `@Microsoft.KeyVault(SecretUri=...)`.
 - **PostgreSQL Flexible Server** — cold-path storage. Provisioned by default;
   opt out via `provisionPostgres = false` to bring your own existing server.
 
@@ -78,12 +81,15 @@ bicep/
 ├── modules/
 │   ├── log-analytics.bicep
 │   ├── app-insights.bicep
+│   ├── keyvault.bicep          # shared secret store, 4 secrets
 │   └── postgres-flexible.bicep # only when provisionPostgres=true
 └── parameters/
     └── main.bicepparam         # the one and only parameter file
 scripts/
-├── deploy.sh                   # apply / what-if
-└── setup-postgres.sh           # post-deploy: schema + roles + migration
+├── deploy.sh                   # apply / what-if (auto-detects deployer OID,
+│                                 writes PG_HOST + KV_NAME back into .env)
+└── setup-postgres.sh           # post-deploy: schema + roles + migration +
+                                  writes 3 connection strings into KV
 ```
 
 ---
@@ -173,40 +179,37 @@ psql "host=$PG_HOST user=pgadmin dbname=observability sslmode=require" \
 -- expect 3 rows: runs, metric_samples, external_calls
 ```
 
-### 2.4 Stash secrets in KeyVault
+### 2.4 Stash AppInsights connection string in KeyVault
 
-`setup-postgres.sh` printed three `az keyvault secret set` commands at the
-end of §2.3 — run them now (adjust the KV name to your shared KeyVault):
+`setup-postgres.sh` already wrote the 3 Postgres URL secrets into the KV
+automatically. The only secret left is the AppInsights connection string
+from §2.2's deploy output:
 
 ```bash
-KV="alpenland-secrets-shared-kv"   # adjust to your shared KV name
-
-# Postgres URLs (paste from setup-postgres.sh output)
-az keyvault secret set --vault-name $KV \
-    --name observability-pg-admin-url \
-    --value "postgresql+psycopg://pgadmin:..."
-
-az keyvault secret set --vault-name $KV \
-    --name observability-sql-url \
-    --value "postgresql+psycopg://obs_writer:..."
-
-az keyvault secret set --vault-name $KV \
-    --name observability-sql-url-readonly \
-    --value "postgresql+psycopg://obs_reader:..."
-
-# AppInsights connection string (from §2.2 deploy output)
-az keyvault secret set --vault-name $KV \
+KV_NAME=$(grep -E '^KV_NAME=' .env | cut -d= -f2)
+az keyvault secret set --vault-name "$KV_NAME" \
     --name appinsights-connection-string \
     --value "InstrumentationKey=...;IngestionEndpoint=..."
 ```
 
-If your KV is named differently — every Alpenland project has its own KV
-today — pick the one your tools already read from, OR create a new shared
-one for cross-tool secrets.
+**Verify all 4 secrets are in place:**
 
-**After this step you can clear the passwords from `.env`** — tools
+```bash
+az keyvault secret list --vault-name "$KV_NAME" --query '[].name' -o tsv
+```
+
+Expected output:
+```
+appinsights-connection-string
+observability-pg-admin-url
+observability-sql-url
+observability-sql-url-readonly
+```
+
+**After this step you can scrub the password lines from `.env`** — tools
 resolve them from KV at runtime via `@Microsoft.KeyVault(SecretUri=...)`
-references.
+references. Keep `.env` itself locally (it has `PG_HOST` + `KV_NAME` which
+are not sensitive) — and never commit it.
 
 ### 2.5 Wire one tool (doc_search as the pilot)
 
@@ -313,10 +316,12 @@ When `provisionPostgres = true` (default):
 | Resource Group | `alpenland-observability-rg` | Holds everything |
 | Log Analytics Workspace | `alpenland-obs-shared-law` | Backing store for AppInsights |
 | Application Insights | `alpenland-obs-shared-ai` | Hot-path telemetry sink |
+| KeyVault | `alpenland-obs-shared-kv` | Stores 4 secrets (1 AppInsights + 3 Postgres URLs) |
 | Postgres Flexible Server | `alpenland-observability-pg` | Cold-path storage |
 | Postgres Database | `observability` | The DB tools write to |
 
-When `provisionPostgres = false`: only the first three are created.
+When `provisionPostgres = false`: the Postgres server + database are skipped;
+the KeyVault is still created (it stores the BYO-Postgres URLs all the same).
 
 > **Not created here:** Action Groups, Alert Rules, on-call routing.
 > Out of scope — see the rationale at the top of this README.
@@ -355,6 +360,7 @@ westeurope, monthly estimates:
 | Component | Monthly |
 |-----------|---------|
 | Log Analytics + AppInsights (5 GB/d cap) | €30–60 |
+| KeyVault (Standard SKU, 4 secrets) | <€1 |
 | Postgres D2s_v3 + zone-redundant HA | ~€270 |
 | **Total (provisioned default)** | **~€300–330** |
 | BYO mode (skip dedicated Postgres) | **~€30–60** |

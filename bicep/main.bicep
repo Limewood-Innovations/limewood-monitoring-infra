@@ -25,6 +25,14 @@ param resourceGroupName string = 'alpenland-observability-rg'
 @description('Daily ingestion cap in GB for Log Analytics — sized for ALL envs together. 0 = no cap.')
 param dailyQuotaGb int = 5
 
+@description('KeyVault name. Must be globally unique across Azure (3-24 chars).')
+@maxLength(24)
+@minLength(3)
+param keyVaultName string = 'alpenland-obs-shared-kv'
+
+@description('AAD object ID of the principal running deploy.sh — gets KV "Secrets Officer" so setup-postgres.sh can write the connection-string secrets. `az ad signed-in-user show --query id -o tsv` for users; SP object id for CI.')
+param deployerObjectId string
+
 // --- Optional: provision a dedicated Postgres server ---------------------
 @description('Provision a managed Postgres server in this RG. Default true. Set false to bring your own existing Postgres (run setup-postgres.sh against it instead).')
 param provisionPostgres bool = true
@@ -89,6 +97,17 @@ module appInsights 'modules/app-insights.bicep' = {
   }
 }
 
+module keyVault 'modules/keyvault.bicep' = {
+  scope: rg
+  name: 'keyvault'
+  params: {
+    name: keyVaultName
+    location: location
+    env: 'shared'
+    deployerObjectId: deployerObjectId
+  }
+}
+
 module postgres 'modules/postgres-flexible.bicep' = if (provisionPostgres) {
   scope: rg
   name: 'postgres'
@@ -111,6 +130,8 @@ module postgres 'modules/postgres-flexible.bicep' = if (provisionPostgres) {
 output resourceGroupName string = rg.name
 output appInsightsConnectionString string = appInsights.outputs.connectionString
 output logAnalyticsWorkspaceId string = logAnalytics.outputs.workspaceId
+output keyVaultName string = keyVault.outputs.vaultName
+output keyVaultUri string = keyVault.outputs.vaultUri
 output postgresProvisioned bool = provisionPostgres
 output postgresFqdn string = provisionPostgres
   ? postgres!.outputs.serverFqdn

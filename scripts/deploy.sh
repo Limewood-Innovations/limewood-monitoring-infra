@@ -18,9 +18,9 @@
 #   OBS_READER_USERNAME / OBS_READER_PASSWORD
 # (also defined in .env.example so a single `source .env` covers all of them.)
 #
-# After a successful deploy, this script writes PG_HOST=<POSTGRESFQDN> back
-# into the repo-root .env so the operator can run setup-postgres.sh without
-# additional config.
+# After a successful deploy, this script writes PG_HOST=<POSTGRESFQDN> and
+# KV_NAME=<KeyVault name> back into the repo-root .env so the operator can
+# run setup-postgres.sh without additional config.
 
 set -euo pipefail
 
@@ -32,6 +32,20 @@ params="${repo_root}/bicep/parameters/main.bicepparam"
 env_file="${repo_root}/.env"
 location="westeurope"
 deployment_name="alpenland-obs-$(date +%Y%m%d%H%M%S)"
+
+# Auto-fetch deployer object id if not already exported. KeyVault module
+# needs it to grant "Secrets Officer" RBAC. For users this is your AAD oid;
+# in CI/SP scenarios, set AZ_DEPLOYER_OBJECT_ID explicitly to the SP oid.
+if [[ -z "${AZ_DEPLOYER_OBJECT_ID:-}" ]]; then
+    if AZ_DEPLOYER_OBJECT_ID="$(az ad signed-in-user show --query id -o tsv 2>/dev/null)"; then
+        export AZ_DEPLOYER_OBJECT_ID
+        echo "→ Detected deployer object ID: ${AZ_DEPLOYER_OBJECT_ID}"
+    else
+        echo "ERROR: AZ_DEPLOYER_OBJECT_ID is not set and could not be auto-detected." >&2
+        echo "       Run 'az login' first, or set AZ_DEPLOYER_OBJECT_ID manually." >&2
+        exit 1
+    fi
+fi
 
 # When provisionPostgres = true (the default), Postgres needs admin credentials
 # at deploy time. Read the bicepparam to detect this so we fail fast with a
@@ -70,31 +84,34 @@ jq -r '
 ' "/tmp/${deployment_name}.json"
 
 # --------------------------------------------------------------------------
-# Auto-persist PG_HOST in .env so setup-postgres.sh works without additional
-# operator action. Overwrites any existing PG_HOST line (idempotent).
+# Auto-persist PG_HOST + KV_NAME into .env so setup-postgres.sh works
+# without operator intervention. Both lines are idempotently replaced.
 # --------------------------------------------------------------------------
 pg_fqdn="$(jq -r '.properties.outputs.postgresFqdn.value // empty' "/tmp/${deployment_name}.json")"
-if [[ -n "${pg_fqdn}" && "${pg_fqdn}" != "(BYO"* ]]; then
-    if [[ -f "${env_file}" ]]; then
-        # Strip any existing PG_HOST line, then append the fresh one.
-        # macOS-compatible (no -i ''):
-        tmp_env="$(mktemp)"
-        grep -v -E '^[[:space:]]*PG_HOST=' "${env_file}" > "${tmp_env}" || true
+kv_name="$(jq -r '.properties.outputs.keyVaultName.value // empty' "/tmp/${deployment_name}.json")"
+
+if [[ -f "${env_file}" ]]; then
+    tmp_env="$(mktemp)"
+    grep -v -E '^[[:space:]]*(PG_HOST|KV_NAME)=' "${env_file}" > "${tmp_env}" || true
+    if [[ -n "${pg_fqdn}" && "${pg_fqdn}" != "(BYO"* ]]; then
         echo "PG_HOST=${pg_fqdn}" >> "${tmp_env}"
-        mv "${tmp_env}" "${env_file}"
-        echo
-        echo "✓ Wrote PG_HOST=${pg_fqdn} into ${env_file}"
-    else
-        echo
-        echo "⚠ ${env_file} not found — set PG_HOST=${pg_fqdn} manually before"
-        echo "  running setup-postgres.sh."
     fi
+    if [[ -n "${kv_name}" ]]; then
+        echo "KV_NAME=${kv_name}" >> "${tmp_env}"
+    fi
+    mv "${tmp_env}" "${env_file}"
+    echo
+    echo "✓ Wrote PG_HOST + KV_NAME into ${env_file}"
+else
+    echo
+    echo "⚠ ${env_file} not found — set PG_HOST=${pg_fqdn} and KV_NAME=${kv_name}"
+    echo "  manually before running setup-postgres.sh."
 fi
 
 echo
 echo "Next steps:"
 echo "  1. Re-export the updated .env:    set -a; source .env; set +a"
 echo "  2. Bootstrap the database:        ./scripts/setup-postgres.sh"
-echo "  3. Stash the printed URLs in KeyVault (the script tells you exactly)."
-echo "  4. Wire each tool (doc_search, hermes, …) with the KeyVault references"
+echo "     (creates schema + roles + writes the 3 connection strings into KV)"
+echo "  3. Wire each tool (doc_search, hermes, …) using the KeyVault references"
 echo "     for APPLICATIONINSIGHTS_CONNECTION_STRING + OBSERVABILITY_SQL_URL."

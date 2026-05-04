@@ -165,20 +165,54 @@ if [[ "${got}" != *"runs"* || "${got}" != *"metric_samples"* || "${got}" != *"ex
 fi
 
 # ---------------------------------------------------------------------------
-# Step 4 — print URLs for KeyVault
+# Step 4 — write URLs directly into KeyVault (no manual copy-paste)
 # ---------------------------------------------------------------------------
 
 writer_url="postgresql+psycopg://${OBS_WRITER_USERNAME}:${OBS_WRITER_PASSWORD}@${PG_HOST}:5432/${PG_DATABASE}?sslmode=require"
 reader_url="postgresql+psycopg://${OBS_READER_USERNAME}:${OBS_READER_PASSWORD}@${PG_HOST}:5432/${PG_DATABASE}?sslmode=require"
 admin_url="postgresql+psycopg://${PG_ADMIN_USERNAME}:${PG_ADMIN_PASSWORD}@${PG_HOST}:5432/${PG_DATABASE}?sslmode=require"
 
-cat <<EOF
+if [[ -n "${KV_NAME:-}" ]]; then
+    if ! command -v az >/dev/null 2>&1; then
+        echo "ERROR: az CLI not found — can't write KV secrets automatically." >&2
+        echo "       The 3 SQLAlchemy URLs are printed below; store them manually." >&2
+        kv_auto=false
+    else
+        echo
+        echo "→ Writing 3 secrets into KeyVault ${KV_NAME}"
+        az keyvault secret set --vault-name "${KV_NAME}" \
+            --name observability-pg-admin-url --value "${admin_url}" --output none
+        az keyvault secret set --vault-name "${KV_NAME}" \
+            --name observability-sql-url --value "${writer_url}" --output none
+        az keyvault secret set --vault-name "${KV_NAME}" \
+            --name observability-sql-url-readonly --value "${reader_url}" --output none
+        kv_auto=true
+    fi
+else
+    kv_auto=false
+fi
 
-✓ Postgres setup complete.
+if ${kv_auto}; then
+    cat <<EOF
 
-Stash these in KeyVault — tools and dashboards read from there:
+✓ Postgres setup complete. Three secrets written to KV ${KV_NAME}:
 
-  KV="alpenland-secrets-shared-kv"   # adjust to your shared KV name
+  observability-pg-admin-url      (admin role — for migrations / DBA work)
+  observability-sql-url           (obs_writer — for tools)
+  observability-sql-url-readonly  (obs_reader — for PowerBI / dashboards)
+
+Tools reference them via @Microsoft.KeyVault(SecretUri=...). Verify with:
+  az keyvault secret list --vault-name ${KV_NAME} --query '[].name' -o tsv
+
+After verifying KV contents, you can scrub the password lines from .env.
+EOF
+else
+    cat <<EOF
+
+✓ Postgres setup complete. KV_NAME not set in .env — store these in KeyVault
+manually:
+
+  KV="<your-keyvault-name>"
 
   az keyvault secret set --vault-name "\$KV" \\
       --name observability-pg-admin-url \\
@@ -192,8 +226,6 @@ Stash these in KeyVault — tools and dashboards read from there:
       --name observability-sql-url-readonly \\
       --value '${reader_url}'
 
-After the secrets are stored, you can scrub the values from .env (the
-KeyVault references in your tools' deploy config will resolve them at
-runtime).
-
+After the secrets are stored, you can scrub the password lines from .env.
 EOF
+fi

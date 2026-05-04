@@ -11,6 +11,18 @@ param resourceGroupName = 'alpenland-observability-rg'
 // Hit a wall? Bump cautiously — at €2.50/GB you can do worse damage with a typo.
 param dailyQuotaGb = 5
 
+// === KeyVault ============================================================
+//
+// Name must be globally unique across Azure. Default is reserved by us.
+// If the deploy errors with "VaultNameNotAvailable", change it.
+param keyVaultName = readEnvironmentVariable('KV_NAME', 'alpenland-obs-shared-kv')
+
+// AAD object ID of the principal running deploy.sh — gets KV "Secrets
+// Officer" so setup-postgres.sh can write secrets directly.
+//   Get the OID:  az ad signed-in-user show --query id -o tsv
+// In CI: use the SP's object ID (NOT the application/client id).
+param deployerObjectId = readEnvironmentVariable('AZ_DEPLOYER_OBJECT_ID', '')
+
 // === Postgres ============================================================
 //
 // DEFAULT: provision a dedicated Azure Postgres Flexible Server in this RG.
