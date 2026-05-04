@@ -51,6 +51,17 @@ fi
 : "${OBS_WRITER_PASSWORD:?OBS_WRITER_PASSWORD must be set in .env}"
 : "${OBS_READER_PASSWORD:?OBS_READER_PASSWORD must be set in .env}"
 
+# Catch the .env.example placeholder text — better fail loud now than silently
+# create database roles with literal "__GENERATE_AND_PUT_INTO_KEYVAULT__" as
+# their password.
+for var in PG_ADMIN_PASSWORD OBS_WRITER_PASSWORD OBS_READER_PASSWORD; do
+    if [[ "${!var}" == *__GENERATE* ]]; then
+        echo "ERROR: ${var} still contains the .env.example placeholder." >&2
+        echo "       Generate a real password: openssl rand -base64 32" >&2
+        exit 1
+    fi
+done
+
 PG_DATABASE="${PG_DATABASE:-observability}"
 PG_ADMIN_USERNAME="${PG_ADMIN_USERNAME:-pgadmin}"
 OBS_WRITER_USERNAME="${OBS_WRITER_USERNAME:-obs_writer}"
