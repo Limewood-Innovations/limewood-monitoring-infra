@@ -9,10 +9,16 @@ Bicep IaC for the **shared** Alpenland observability stack:
   all 24 Alpenland tools via the
   [`limewood-observability`](https://github.com/Limewood-Innovations/limewood-observability)
   Python library.
-- **Action Group** — Azure Monitor alerts → existing OpsGenie rotation.
-- **Postgres** (default: dedicated managed Flexible Server in this RG; opt out
-  with `provisionPostgres = false` to reuse an existing server — see
-  [BYO section](#bring-your-own-postgres)).
+- **PostgreSQL Flexible Server** — cold-path storage. Provisioned by default;
+  opt out via `provisionPostgres = false` to bring your own existing server.
+
+> **Alerting / on-call routing is intentionally NOT bundled.**
+> Tools route their own heartbeats (e.g. doc_search uses
+> `HEARTBEAT_URL/USER/KEY` env vars) — that path is unchanged.
+> Azure-Monitor-driven alerts (anomaly detection, AppInsights availability,
+> ingestion-cap alarms) can be added later as a separate concern via your
+> own Action Group(s) — they are out of scope of this Bicep so the stack
+> stays decoupled from any specific JSM/PagerDuty/SendGrid integration.
 
 Pairs with:
 
@@ -46,9 +52,8 @@ Pairs with:
 ## Single shared deployment
 
 **One** resource group, **one** Application Insights, **one** Log Analytics
-Workspace, **one** Action Group, **one** Postgres — shared across `dev` /
-`stage` / `prod`. Tools tag every event with `app_env`; dashboards filter at
-query time:
+Workspace, **one** Postgres — shared across `dev` / `stage` / `prod`. Tools
+tag every event with `app_env`; dashboards filter at query time:
 
 ```kql
 customEvents | where customDimensions.app_env == "prod"
@@ -73,7 +78,6 @@ bicep/
 ├── modules/
 │   ├── log-analytics.bicep
 │   ├── app-insights.bicep
-│   ├── action-group.bicep
 │   └── postgres-flexible.bicep # only when provisionPostgres=true
 └── parameters/
     └── main.bicepparam         # the one and only parameter file
@@ -95,34 +99,8 @@ proceed until the previous step passes its check.
 |---|--------|--------|
 | 1 | `az login --tenant <alpenland-tenant>` + `az account set --subscription <sub>` | `az account show` shows the right subscription |
 | 2 | `az provider register --namespace Microsoft.Insights` (and `Microsoft.OperationalInsights`, `Microsoft.DBforPostgreSQL`) | `az provider show -n <ns> --query registrationState` returns `Registered` |
-| 3 | JSM Ops integration setup (see "JSM Ops integration" section below) — the legacy OpsGenie "Azure Monitor" integration is deprecated | URL starts with `https://api.atlassian.com/jsm/ops/integration/v2/<id>/<key>` |
-| 4 | Generate Postgres admin password: `openssl rand -base64 32` | safe spot for the value |
-| 5 | `az ad signed-in-user show --query id -o tsv` → record OBJECT_ID for AAD admin | GUID printed |
-
-### JSM Ops integration
-
-> The legacy OpsGenie "Azure Monitor" integration was discontinued with the
-> Atlassian → JSM migration. Use a generic API/Webhook integration in JSM
-> Ops; Azure Monitor sends Common Alert Schema, JSM ingests as alerts.
-
-In JSM:
-
-1. Jira → **Operations** → **Settings** → **Integrations** → **Add integration**
-2. Type: **API** (recommended — accepts arbitrary JSON without field mapping)
-   or **Webhook** (needs explicit field mapping; see operator guide).
-3. Name: `azure-monitor-shared`. Assign to your existing on-call team.
-4. Save → copy the URL (this is your `OPSGENIE_WEBHOOK_URL`):
-   ```
-   https://api.atlassian.com/jsm/ops/integration/v2/<integration-id>/<integration-key>
-   ```
-
-**Verify:**
-```bash
-curl -X POST "$OPSGENIE_WEBHOOK_URL" -H 'Content-Type: application/json' \
-     -d '{"data":{"essentials":{"alertRule":"smoke-test","alertId":"smoke-001","monitorCondition":"Fired","severity":"Sev3"}}}'
-```
-Expect a new alert in JSM Ops with message `smoke-test` and alias `smoke-001`.
-Sending the same payload twice → JSM dedupes via `alias` (one alert, not two).
+| 3 | Generate Postgres admin password: `openssl rand -base64 32` | safe spot for the value |
+| 4 | `az ad signed-in-user show --query id -o tsv` → record OBJECT_ID for AAD admin | GUID printed |
 
 ### 2.2 Bicep deploy (~10 min)
 
@@ -141,9 +119,8 @@ set -a; source .env; set +a   # exports vars to current shell
 
 | Variable | Required when | Source |
 |----------|---------------|--------|
-| `OPSGENIE_WEBHOOK_URL` | always | step 3 above |
-| `PG_ADMIN_PASSWORD` | `provisionPostgres=true` (default) | step 4 |
-| `PG_AAD_ADMIN_OBJECT_ID` | `provisionPostgres=true` | step 5 |
+| `PG_ADMIN_PASSWORD` | `provisionPostgres=true` (default) | step 3 |
+| `PG_AAD_ADMIN_OBJECT_ID` | `provisionPostgres=true` | step 4 |
 | `PG_AAD_ADMIN_NAME` | `provisionPostgres=true` | your display name |
 
 deploy.sh fails fast with a helpful message if any required var is missing.
@@ -286,8 +263,7 @@ Want to reuse Alpenland's existing Postgres server (the one Portal Backend /
 DTE / Sync Service API GW already use) instead of a dedicated one?
 
 1. Edit `bicep/parameters/main.bicepparam`: set `provisionPostgres = false`.
-2. `./scripts/deploy.sh` then only deploys AppInsights + Log Analytics +
-   Action Group.
+2. `./scripts/deploy.sh` then only deploys AppInsights + Log Analytics.
 3. Run `setup-postgres.sh` against your existing server:
    ```bash
    export PG_HOST="<existing-server>.postgres.database.azure.com"
@@ -315,11 +291,13 @@ When `provisionPostgres = true` (default):
 | Resource Group | `alpenland-observability-rg` | Holds everything |
 | Log Analytics Workspace | `alpenland-obs-shared-law` | Backing store for AppInsights |
 | Application Insights | `alpenland-obs-shared-ai` | Hot-path telemetry sink |
-| Action Group | `alpenland-obs-shared-ag` | Azure Monitor → OpsGenie |
 | Postgres Flexible Server | `alpenland-observability-pg` | Cold-path storage |
 | Postgres Database | `observability` | The DB tools write to |
 
-When `provisionPostgres = false`: only the first four are created.
+When `provisionPostgres = false`: only the first three are created.
+
+> **Not created here:** Action Groups, Alert Rules, on-call routing.
+> Out of scope — see the rationale at the top of this README.
 
 ---
 
@@ -332,7 +310,6 @@ the relevant ones into KeyVault):
 RESOURCEGROUPNAME=alpenland-observability-rg
 APPINSIGHTSCONNECTIONSTRING=InstrumentationKey=…;IngestionEndpoint=…
 LOGANALYTICSWORKSPACEID=/subscriptions/…/workspaces/alpenland-obs-shared-law
-ACTIONGROUPID=/subscriptions/…/microsoft.insights/actionGroups/alpenland-obs-shared-ag
 POSTGRESPROVISIONED=true
 POSTGRESFQDN=alpenland-observability-pg.postgres.database.azure.com
 ```
@@ -356,7 +333,6 @@ westeurope, monthly estimates:
 | Component | Monthly |
 |-----------|---------|
 | Log Analytics + AppInsights (5 GB/d cap) | €30–60 |
-| Action Group | ~€0 |
 | Postgres D2s_v3 + zone-redundant HA | ~€270 |
 | **Total (provisioned default)** | **~€300–330** |
 | BYO mode (skip dedicated Postgres) | **~€30–60** |
@@ -397,9 +373,9 @@ for the full library API.
 ## Day-2 operations
 
 For incident playbooks (telemetry stopped flowing, AppInsights cap exceeded,
-PG connection pool exhausted, schema migration broke a tool, OpsGenie noise),
-backup & restore, schema migration procedure, cost monitoring, and on-call
-cheat-sheet — see the **Run Book** in Obsidian:
+PG connection pool exhausted, schema migration broke a tool), backup &
+restore, schema migration procedure, cost monitoring, and on-call cheat-sheet
+— see the **Run Book** in Obsidian:
 
 - *Limewood Observability — Run Book* (Obsidian)
 - *Limewood Observability — Operator Guide* (Obsidian) — broader operator+developer guide
@@ -421,8 +397,6 @@ cheat-sheet — see the **Run Book** in Obsidian:
 | `setup-postgres.sh: PG_HOST must be set` | Forgot to export the FQDN | `export PG_HOST=alpenland-observability-pg.postgres.database.azure.com` |
 | `deploy.sh: PG_ADMIN_PASSWORD must be set` | provisionPostgres=true but no admin pwd in env | `export PG_ADMIN_PASSWORD=$(openssl rand -base64 32)` and stash it in KV |
 | Bicep `if (provisionPostgres)` won't compile | Bicep CLI < 0.30 | `az bicep upgrade` |
-| JSM Ops shows no alert though Action Group fired | wrong integration URL OR field-mapping broken | re-test with `curl` → check JSM → Settings → Integrations → "Activity" tab. See Run Book IP-07. |
-| Where is the OpsGenie "Azure Monitor" integration? | Deprecated since JSM migration | Use generic JSM Ops API integration — see "JSM Ops integration" section above. |
 
 ---
 

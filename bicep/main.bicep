@@ -1,15 +1,18 @@
 // Alpenland observability stack — single shared deployment.
 //
 // Strategy (decided 2026-05-04): one resource group, one Application Insights,
-// one Log Analytics Workspace, one Action Group — shared across dev / stage /
-// prod. Tools tag every event with `app_env` so dashboards filter at query
-// time.
+// one Log Analytics Workspace — shared across dev / stage / prod. Tools tag
+// every event with `app_env` so dashboards filter at query time.
 //
-// Postgres: by default this Bicep does NOT provision a managed Postgres
-// server. Alpenland already runs 9 services on Azure Database for PostgreSQL
-// Flexible Server, and one extra `observability` database on the existing
-// instance is much cheaper than a new dedicated server. Set
-// `provisionPostgres = true` to opt into a dedicated managed server.
+// Postgres: by default this Bicep provisions a managed PostgreSQL Flexible
+// Server in this RG. Set `provisionPostgres = false` to bring your own
+// existing server; the schema is then bootstrapped on it via
+// `scripts/setup-postgres.sh`.
+//
+// Alerting / on-call routing is intentionally NOT bundled here. Heartbeats
+// from individual tools (e.g. doc_search) keep using their existing
+// HEARTBEAT_URL/USER/KEY env vars — that path is unchanged. Azure Monitor
+// alert rules + Action Groups can be added later as a separate concern.
 
 targetScope = 'subscription'
 
@@ -22,13 +25,9 @@ param resourceGroupName string = 'alpenland-observability-rg'
 @description('Daily ingestion cap in GB for Log Analytics — sized for ALL envs together. 0 = no cap.')
 param dailyQuotaGb int = 5
 
-@description('JSM Ops integration URL (api.atlassian.com/jsm/ops/integration/v2/<id>/<key>). The legacy OpsGenie "Azure Monitor" integration is deprecated — use a generic API/Webhook integration. See operator guide.')
-@secure()
-param opsgenieWebhookUrl string
-
 // --- Optional: provision a dedicated Postgres server ---------------------
-@description('Provision a managed Postgres server in this RG. Default false — bring your own DB (recommended for Alpenland: reuse the existing portal-pg server with a new `observability` database).')
-param provisionPostgres bool = false
+@description('Provision a managed Postgres server in this RG. Default true. Set false to bring your own existing Postgres (run setup-postgres.sh against it instead).')
+param provisionPostgres bool = true
 
 @description('Postgres server name (only used when provisionPostgres=true).')
 param pgServerName string = 'alpenland-observability-pg'
@@ -96,17 +95,6 @@ module appInsights 'modules/app-insights.bicep' = {
   }
 }
 
-module actionGroup 'modules/action-group.bicep' = {
-  scope: rg
-  name: 'action-group'
-  params: {
-    name: 'alpenland-obs-shared-ag'
-    shortName: 'opsg-shared'
-    opsgenieWebhookUrl: opsgenieWebhookUrl
-    env: 'shared'
-  }
-}
-
 module postgres 'modules/postgres-flexible.bicep' = if (provisionPostgres) {
   scope: rg
   name: 'postgres'
@@ -131,7 +119,6 @@ module postgres 'modules/postgres-flexible.bicep' = if (provisionPostgres) {
 output resourceGroupName string = rg.name
 output appInsightsConnectionString string = appInsights.outputs.connectionString
 output logAnalyticsWorkspaceId string = logAnalytics.outputs.workspaceId
-output actionGroupId string = actionGroup.outputs.actionGroupId
 output postgresProvisioned bool = provisionPostgres
 output postgresFqdn string = provisionPostgres
   ? postgres!.outputs.serverFqdn

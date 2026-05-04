@@ -11,8 +11,6 @@ param resourceGroupName = 'alpenland-observability-rg'
 // Hit a wall? Bump cautiously — at €2.50/GB you can do worse damage with a typo.
 param dailyQuotaGb = 5
 
-param opsgenieWebhookUrl = readEnvironmentVariable('OPSGENIE_WEBHOOK_URL', '')
-
 // === Postgres ============================================================
 //
 // DEFAULT: provision a dedicated Azure Postgres Flexible Server in this RG.

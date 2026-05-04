@@ -9,10 +9,7 @@
 #   ./scripts/deploy.sh            # deploy
 #   ./scripts/deploy.sh --whatif   # dry-run, show diff only
 #
-# Required env vars (always):
-#   OPSGENIE_WEBHOOK_URL    — Azure Monitor → OpsGenie webhook
-#
-# Required env vars only when provisionPostgres=true (default false):
+# Required env vars only when provisionPostgres=true (the default):
 #   PG_ADMIN_PASSWORD       — generate with `openssl rand -base64 32`
 #   PG_AAD_ADMIN_OBJECT_ID  — `az ad signed-in-user show --query id -o tsv`
 #   PG_AAD_ADMIN_NAME       — display name (cosmetic)
@@ -20,8 +17,6 @@
 set -euo pipefail
 
 mode="${1:-create}"
-
-: "${OPSGENIE_WEBHOOK_URL:?OPSGENIE_WEBHOOK_URL must be set}"
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 template="${repo_root}/bicep/main.bicep"
@@ -71,9 +66,9 @@ echo
 echo "Next steps:"
 echo "  1. Stash APPINSIGHTS_CONNECTION_STRING in the shared KeyVault as"
 echo "     secret 'appinsights-connection-string'."
-echo "  2. If POSTGRES_PROVISIONED = false, run the BYO-Postgres setup from"
-echo "     the README to create the observability DB + obs_writer role on"
-echo "     your existing Postgres, then stash the URL in KeyVault as"
-echo "     'observability-sql-url'."
+echo "  2. Run scripts/setup-postgres.sh to create the schema +"
+echo "     obs_writer/obs_reader roles + apply migrations. Set PG_HOST and"
+echo "     PG_ADMIN_PASSWORD first; if you set provisionPostgres=false above,"
+echo "     point PG_HOST at your existing Postgres."
 echo "  3. Each tool (doc_search, hermes, …) sets the same two ENV vars in"
 echo "     dev/stage/prod — only APP_ENV differs."
