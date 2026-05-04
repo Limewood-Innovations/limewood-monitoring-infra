@@ -43,6 +43,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 env_file="${repo_root}/.env"
 if [[ -f "${env_file}" ]] && [[ -z "${PG_HOST:-}" || -z "${PG_ADMIN_PASSWORD:-}" ]]; then
     echo "→ Auto-loading ${env_file}"
+    # shellcheck source=/dev/null
     set -a; source "${env_file}"; set +a
 fi
 
