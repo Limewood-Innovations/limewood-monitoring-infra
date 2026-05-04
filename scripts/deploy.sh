@@ -47,6 +47,25 @@ if [[ -z "${AZ_DEPLOYER_OBJECT_ID:-}" ]]; then
     fi
 fi
 
+# Auto-fetch the operator's public IPv4. Postgres firewall rule "AllowDeployer"
+# uses it so setup-postgres.sh can connect from the laptop. CI / pipelines
+# from inside Azure don't need this (AllowAllAzureIPs covers them) — set
+# DEPLOYER_IP=skip explicitly to skip the firewall rule entirely.
+if [[ -z "${DEPLOYER_IP:-}" ]]; then
+    if DEPLOYER_IP="$(curl -fsS -4 https://ifconfig.me 2>/dev/null)" && [[ -n "${DEPLOYER_IP}" ]]; then
+        export DEPLOYER_IP
+        echo "→ Detected deployer public IP: ${DEPLOYER_IP}"
+    else
+        echo "⚠ Could not auto-detect public IP — Postgres firewall rule for"
+        echo "  the operator skipped. setup-postgres.sh from a laptop will"
+        echo "  fail with 'Connection refused' until you add a rule manually."
+        export DEPLOYER_IP=''
+    fi
+elif [[ "${DEPLOYER_IP}" == "skip" ]]; then
+    echo "→ DEPLOYER_IP=skip: operator firewall rule explicitly disabled"
+    export DEPLOYER_IP=''
+fi
+
 # When provisionPostgres = true (the default), Postgres needs admin credentials
 # at deploy time. Read the bicepparam to detect this so we fail fast with a
 # helpful message instead of letting Bicep complain mid-deploy.

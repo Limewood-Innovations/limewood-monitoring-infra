@@ -44,6 +44,9 @@ param adminUsername string
 @secure()
 param adminPassword string
 
+@description('Optional public IPv4 of the operator running deploy.sh / setup-postgres.sh. When set, a firewall rule is created that lets that single IP through. Empty = skip (CI/Container-Apps only — they go through AllowAllAzureIPs).')
+param deployerIpAddress string = ''
+
 resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: name
   location: location
@@ -94,6 +97,17 @@ resource fwAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2
   properties: {
     startIpAddress: '0.0.0.0'
     endIpAddress: '0.0.0.0'
+  }
+}
+
+// Operator's public IP (laptop running deploy.sh + setup-postgres.sh).
+// Idempotent: same rule name → same rule updated, no stale leftovers.
+resource fwAllowDeployer 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = if (!empty(deployerIpAddress)) {
+  parent: pg
+  name: 'AllowDeployer'
+  properties: {
+    startIpAddress: deployerIpAddress
+    endIpAddress: deployerIpAddress
   }
 }
 

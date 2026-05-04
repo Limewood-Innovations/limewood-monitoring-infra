@@ -42,3 +42,7 @@ param pgStorageSizeGB = 128
 param pgBackupRetentionDays = 35
 param pgAdminUsername = readEnvironmentVariable('PG_ADMIN_USERNAME', 'pgadmin')
 param pgAdminPassword = readEnvironmentVariable('PG_ADMIN_PASSWORD', '')
+
+// Public IP of the operator running deploy.sh / setup-postgres.sh.
+// deploy.sh auto-detects via `curl -s -4 ifconfig.me` if unset.
+param deployerIpAddress = readEnvironmentVariable('DEPLOYER_IP', '')

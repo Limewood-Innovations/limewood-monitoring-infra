@@ -56,6 +56,9 @@ param pgAdminUsername string = 'pgadmin'
 @secure()
 param pgAdminPassword string = ''
 
+@description('Optional public IPv4 of the operator running deploy.sh, so the Postgres firewall lets the laptop in for setup-postgres.sh. Auto-filled from the DEPLOYER_IP env var.')
+param deployerIpAddress string = ''
+
 // ---------------------------------------------------------------------------
 // Resource group
 // ---------------------------------------------------------------------------
@@ -120,6 +123,7 @@ module postgres 'modules/postgres-flexible.bicep' = if (provisionPostgres) {
     backupRetentionDays: pgBackupRetentionDays
     adminUsername: pgAdminUsername
     adminPassword: pgAdminPassword
+    deployerIpAddress: deployerIpAddress
   }
 }
 
