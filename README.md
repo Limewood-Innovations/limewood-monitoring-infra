@@ -179,22 +179,14 @@ psql "host=$PG_HOST user=pgadmin dbname=observability sslmode=require" \
 -- expect 3 rows: runs, metric_samples, external_calls
 ```
 
-### 2.4 Stash AppInsights connection string in KeyVault
+### 2.4 Verify all 4 secrets landed in KeyVault
 
-`setup-postgres.sh` already wrote the 3 Postgres URL secrets into the KV
-automatically. The only secret left is the AppInsights connection string
-from §2.2's deploy output:
+There's nothing to do by hand: `deploy.sh` wrote the AppInsights connection
+string into the KV automatically (right after creating the KV), and
+`setup-postgres.sh` wrote the 3 Postgres URLs.
 
 ```bash
 KV_NAME=$(grep -E '^KV_NAME=' .env | cut -d= -f2)
-az keyvault secret set --vault-name "$KV_NAME" \
-    --name appinsights-connection-string \
-    --value "InstrumentationKey=...;IngestionEndpoint=..."
-```
-
-**Verify all 4 secrets are in place:**
-
-```bash
 az keyvault secret list --vault-name "$KV_NAME" --query '[].name' -o tsv
 ```
 
@@ -206,10 +198,10 @@ observability-sql-url
 observability-sql-url-readonly
 ```
 
-**After this step you can scrub the password lines from `.env`** — tools
-resolve them from KV at runtime via `@Microsoft.KeyVault(SecretUri=...)`
-references. Keep `.env` itself locally (it has `PG_HOST` + `KV_NAME` which
-are not sensitive) — and never commit it.
+**Once verified, scrub the password lines from `.env`** — tools resolve
+them from KV at runtime via `@Microsoft.KeyVault(SecretUri=...)`
+references. Keep `.env` itself locally (it now has only `PG_HOST` +
+`KV_NAME`, neither sensitive) — and never commit it.
 
 ### 2.5 Wire one tool (doc_search as the pilot)
 

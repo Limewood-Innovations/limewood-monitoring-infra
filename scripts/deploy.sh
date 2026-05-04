@@ -89,6 +89,7 @@ jq -r '
 # --------------------------------------------------------------------------
 pg_fqdn="$(jq -r '.properties.outputs.postgresFqdn.value // empty' "/tmp/${deployment_name}.json")"
 kv_name="$(jq -r '.properties.outputs.keyVaultName.value // empty' "/tmp/${deployment_name}.json")"
+ai_conn="$(jq -r '.properties.outputs.appInsightsConnectionString.value // empty' "/tmp/${deployment_name}.json")"
 
 if [[ -f "${env_file}" ]]; then
     tmp_env="$(mktemp)"
@@ -108,10 +109,45 @@ else
     echo "  manually before running setup-postgres.sh."
 fi
 
+# --------------------------------------------------------------------------
+# Auto-store AppInsights connection string in KeyVault. The KV resource +
+# RBAC role assignment for the deployer were just created above, so this
+# `az keyvault secret set` is authorised by the same `az login` session
+# that ran the Bicep deploy.
+# --------------------------------------------------------------------------
+if [[ -n "${kv_name}" && -n "${ai_conn}" ]]; then
+    if command -v az >/dev/null 2>&1; then
+        echo
+        echo "→ Storing AppInsights connection string in KV ${kv_name}"
+        # Bicep RBAC role assignments can take ~1 minute to propagate. Retry
+        # on Forbidden so the operator doesn't have to re-run by hand.
+        attempt=0
+        until az keyvault secret set \
+                --vault-name "${kv_name}" \
+                --name appinsights-connection-string \
+                --value "${ai_conn}" \
+                --output none 2>/tmp/kv-set.err; do
+            attempt=$((attempt + 1))
+            if [[ ${attempt} -ge 6 ]]; then
+                echo "⚠ Failed to store appinsights-connection-string after 6 attempts:" >&2
+                cat /tmp/kv-set.err >&2
+                echo "  Run manually:" >&2
+                echo "    az keyvault secret set --vault-name ${kv_name} --name appinsights-connection-string --value '${ai_conn}'" >&2
+                break
+            fi
+            echo "  RBAC propagation pending — retry ${attempt}/6 in 15s..."
+            sleep 15
+        done
+        if [[ ${attempt} -lt 6 ]]; then
+            echo "✓ Stored appinsights-connection-string in ${kv_name}"
+        fi
+    fi
+fi
+
 echo
 echo "Next steps:"
 echo "  1. Re-export the updated .env:    set -a; source .env; set +a"
 echo "  2. Bootstrap the database:        ./scripts/setup-postgres.sh"
-echo "     (creates schema + roles + writes the 3 connection strings into KV)"
-echo "  3. Wire each tool (doc_search, hermes, …) using the KeyVault references"
-echo "     for APPLICATIONINSIGHTS_CONNECTION_STRING + OBSERVABILITY_SQL_URL."
+echo "     (creates schema + roles + writes the 3 PG URLs into KV)"
+echo
+echo "  All 4 KV secrets land automatically — nothing manual to copy-paste."
