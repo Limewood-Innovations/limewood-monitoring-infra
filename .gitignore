@@ -3,4 +3,5 @@
 .vscode/
 .env
 .env.*
+!.env.example
 /tmp/
