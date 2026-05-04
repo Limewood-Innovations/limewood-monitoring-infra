@@ -29,6 +29,15 @@ params="${repo_root}/bicep/parameters/main.bicepparam"
 location="westeurope"
 deployment_name="alpenland-obs-$(date +%Y%m%d%H%M%S)"
 
+# When provisionPostgres = true (the default), Postgres needs admin credentials
+# at deploy time. Read the bicepparam to detect this so we fail fast with a
+# helpful message instead of letting Bicep complain mid-deploy.
+if grep -qE '^param +provisionPostgres += +true\b' "${params}"; then
+    : "${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD must be set when provisioning Postgres (openssl rand -base64 32)}"
+    : "${PG_AAD_ADMIN_OBJECT_ID:?PG_AAD_ADMIN_OBJECT_ID must be set (az ad signed-in-user show --query id -o tsv)}"
+    : "${PG_AAD_ADMIN_NAME:?PG_AAD_ADMIN_NAME must be set (display name of the AAD admin)}"
+fi
+
 echo "→ Deploying observability stack (mode=${mode})"
 echo "  template: ${template}"
 echo "  params:   ${params}"

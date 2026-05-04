@@ -69,79 +69,42 @@ POSTGRESPROVISIONED=false
 POSTGRESFQDN=(BYO Postgres — set OBSERVABILITY_SQL_URL manually, see README)
 ```
 
-## Bring Your Own Postgres
+## Default deployment: Bicep provisions Postgres
 
-Alpenland already runs ~9 services on Azure Database for PostgreSQL Flexible
-Server. Add a single new **database** to that existing server instead of
-provisioning a new one — cheaper and the operations team already knows it.
-
-### One-time DBA setup
-
-Run as the existing server admin:
+After `./scripts/deploy.sh` finishes, Bicep has created a managed Postgres
+Flexible Server (default `Standard_D2s_v3` + zone-redundant HA in prod) and
+an empty `observability` database. The schema, roles, and migrations are
+applied via a one-liner post-deploy:
 
 ```bash
-psql "host=<existing-server>.postgres.database.azure.com user=<admin> sslmode=require" <<'SQL'
-
--- 1. Dedicated database (no mixing with portal data)
-CREATE DATABASE observability
-    WITH ENCODING = 'UTF8'
-         LC_COLLATE = 'en_US.utf8'
-         LC_CTYPE = 'en_US.utf8'
-         TEMPLATE = template0;
-
-\c observability
-
--- 2. Schema
-CREATE SCHEMA IF NOT EXISTS observability;
-
--- 3. Write user (least-privilege — no DDL)
-CREATE ROLE obs_writer LOGIN PASSWORD '<random-32-chars>';
-GRANT CONNECT ON DATABASE observability TO obs_writer;
-GRANT USAGE  ON SCHEMA observability TO obs_writer;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA observability TO obs_writer;
-GRANT USAGE  ON ALL SEQUENCES IN SCHEMA observability TO obs_writer;
-ALTER DEFAULT PRIVILEGES IN SCHEMA observability
-    GRANT SELECT, INSERT, UPDATE ON TABLES TO obs_writer;
-ALTER DEFAULT PRIVILEGES IN SCHEMA observability
-    GRANT USAGE ON SEQUENCES TO obs_writer;
-
--- 4. Read-only user (PowerBI / dashboards)
-CREATE ROLE obs_reader LOGIN PASSWORD '<random-32-chars>';
-GRANT CONNECT ON DATABASE observability TO obs_reader;
-GRANT USAGE  ON SCHEMA observability TO obs_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA observability TO obs_reader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA observability
-    GRANT SELECT ON TABLES TO obs_reader;
-
-SQL
+export PG_HOST="alpenland-observability-pg.postgres.database.azure.com"  # from POSTGRESFQDN output
+export PG_ADMIN_PASSWORD="$PG_ADMIN_PASSWORD"   # same value used in deploy
+./scripts/setup-postgres.sh
 ```
 
-### Apply schema migrations
+The script:
 
-As `pgadmin` (the writer role intentionally has no DDL):
+1. Creates the `observability` schema
+2. Creates `obs_writer` (least-privilege, no DDL) and `obs_reader` roles
+3. Pulls and runs the latest migration from `limewood-observability-db@main`
+4. Prints two SQLAlchemy URLs to paste into KeyVault
 
-```bash
-git clone https://github.com/Limewood-Innovations/limewood-observability-db.git
-psql "host=<existing-server>.postgres.database.azure.com user=pgadmin dbname=observability sslmode=require" \
-    -f limewood-observability-db/src/limewood_observability_db/migrations/001_init_postgres.sql
-```
+Idempotent — re-running on an already-bootstrapped DB is a no-op.
 
-Verify:
+## Alternative: Bring Your Own Postgres
 
-```sql
-\c observability
-\dt observability.*       -- expect: runs, metric_samples, external_calls
-\dv observability.*       -- expect: v_runs_24h
-```
+Want to reuse Alpenland's existing Postgres server (the one Portal Backend /
+DTE / Sync Service API GW already use) instead of a dedicated one?
 
-### Stash connection string in KeyVault
+1. Edit `bicep/parameters/main.bicepparam`: set `provisionPostgres = false`.
+2. `./scripts/deploy.sh` then only deploys AppInsights + Log Analytics +
+   Action Group.
+3. Run `setup-postgres.sh` against your existing server (set
+   `PG_HOST=<existing-fqdn>`, `PG_ADMIN_PASSWORD=<existing-admin-pwd>`).
+   Same script, just points at a different server.
 
-```bash
-URL="postgresql+psycopg://obs_writer:<password>@<existing-server>.postgres.database.azure.com:5432/observability?sslmode=require"
-az keyvault secret set --vault-name <shared-kv> \
-    --name observability-sql-url \
-    --value "$URL"
-```
+Tradeoff: ~€270/month saved, but you share the existing server's connection
+pool with portal/sync workloads.
 
 ### Tools consume it
 
@@ -154,28 +117,15 @@ APPLICATIONINSIGHTS_CONNECTION_STRING=@Microsoft.KeyVault(SecretUri=…/appinsig
 APP_ENV=dev|stage|prod
 ```
 
-## Opt out: dedicated managed Postgres
-
-If you ever decide *against* BYO and want a managed Postgres dedicated to
-observability:
-
-```bash
-export PG_ADMIN_PASSWORD="$(openssl rand -base64 32)"
-export PG_AAD_ADMIN_OBJECT_ID="$(az ad signed-in-user show --query id -o tsv)"
-export PG_AAD_ADMIN_NAME="<your display name>"
-# Edit bicep/parameters/main.bicepparam → set provisionPostgres = true
-./scripts/deploy.sh
-```
-
 ## Cost reference (westeurope, monthly estimates)
 
 | Component | Monthly |
 |-----------|---------|
 | Log Analytics + AppInsights (5 GB/d cap) | €30–60 |
 | Action Group | ~€0 |
-| **Total Bicep-managed (BYO mode)** | **~€30–60** |
-| Postgres extra DB on existing server | ~€0 |
-| Optional dedicated Postgres D2s_v3 + HA | +€270 |
+| Postgres D2s_v3 + zone-redundant HA (default) | ~€270 |
+| **Total Bicep-managed (provisioned)** | **~€300–330** |
+| BYO mode: skip dedicated Postgres | **~€30–60** |
 
 Hitting the AppInsights cap? Bump `dailyQuotaGb` in
 `bicep/parameters/main.bicepparam` cautiously — at €2.50/GB you can do worse

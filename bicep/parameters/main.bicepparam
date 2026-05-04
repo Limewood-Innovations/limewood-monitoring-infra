@@ -15,26 +15,19 @@ param opsgenieWebhookUrl = readEnvironmentVariable('OPSGENIE_WEBHOOK_URL', '')
 
 // === Postgres ============================================================
 //
-// DEFAULT: BYO — reuse Alpenland's existing Azure Postgres Flexible Server
-// (the one Portal Backend / DTE / Sync Service API GW already use). One extra
-// `observability` database on it costs ~€0.
+// DEFAULT: provision a dedicated Azure Postgres Flexible Server in this RG.
+// Bicep creates the server + the `observability` database. The
+// schema/tables/roles are then set up post-deploy via
+// `scripts/setup-postgres.sh` (a single psql run).
 //
-// Manual one-time setup on the existing server (see README "Bring Your Own
-// Postgres"):
-//   1. CREATE DATABASE observability
-//   2. Run migrations/001_init_postgres.sql as the server admin
-//   3. CREATE ROLE obs_writer / obs_reader (least-privilege)
-//   4. Stash the resulting connection string in
-//      kv-secret/observability-sql-url
-//
-// To OPT INTO a dedicated managed server instead: flip provisionPostgres = true
-// and fill the pg* params below (or pass them via env vars).
+// To OPT OUT (BYO — reuse an existing Postgres server, e.g. Alpenland's
+// portal-pg): flip provisionPostgres = false. The pg* params below are then
+// ignored. See README "Bring Your Own Postgres" for the manual psql setup.
 
-param provisionPostgres = false
+param provisionPostgres = true
 
-// All pg* params below are only consumed when provisionPostgres = true.
 param pgServerName = 'alpenland-observability-pg'
-param pgSkuName = 'Standard_D2s_v3'
+param pgSkuName = 'Standard_D2s_v3'      // prod-grade — single server serves all envs
 param pgStorageSizeGB = 128
 param pgBackupRetentionDays = 35
 param pgAdminUsername = 'pgadmin'
