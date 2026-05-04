@@ -43,8 +43,10 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 env_file="${repo_root}/.env"
 if [[ -f "${env_file}" ]] && [[ -z "${PG_HOST:-}" || -z "${PG_ADMIN_PASSWORD:-}" ]]; then
     echo "→ Auto-loading ${env_file}"
+    set -a
     # shellcheck source=/dev/null
-    set -a; source "${env_file}"; set +a
+    source "${env_file}"
+    set +a
 fi
 
 : "${PG_HOST:?PG_HOST must be set. Run deploy.sh first (it writes PG_HOST into .env), or export PG_HOST=<your-server>.postgres.database.azure.com}"
