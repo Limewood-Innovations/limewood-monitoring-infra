@@ -22,7 +22,7 @@ param resourceGroupName string = 'alpenland-observability-rg'
 @description('Daily ingestion cap in GB for Log Analytics — sized for ALL envs together. 0 = no cap.')
 param dailyQuotaGb int = 5
 
-@description('OpsGenie integration URL (Azure Monitor webhook).')
+@description('JSM Ops integration URL (api.atlassian.com/jsm/ops/integration/v2/<id>/<key>). The legacy OpsGenie "Azure Monitor" integration is deprecated — use a generic API/Webhook integration. See operator guide.')
 @secure()
 param opsgenieWebhookUrl string
 

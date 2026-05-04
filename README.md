@@ -95,9 +95,34 @@ proceed until the previous step passes its check.
 |---|--------|--------|
 | 1 | `az login --tenant <alpenland-tenant>` + `az account set --subscription <sub>` | `az account show` shows the right subscription |
 | 2 | `az provider register --namespace Microsoft.Insights` (and `Microsoft.OperationalInsights`, `Microsoft.DBforPostgreSQL`) | `az provider show -n <ns> --query registrationState` returns `Registered` |
-| 3 | OpsGenie → Integrations → **Azure Monitor** → create new → copy the webhook URL | URL starts with `https://api.opsgenie.com/v1/json/azuremonitor?apiKey=` |
+| 3 | JSM Ops integration setup (see "JSM Ops integration" section below) — the legacy OpsGenie "Azure Monitor" integration is deprecated | URL starts with `https://api.atlassian.com/jsm/ops/integration/v2/<id>/<key>` |
 | 4 | Generate Postgres admin password: `openssl rand -base64 32` | safe spot for the value |
 | 5 | `az ad signed-in-user show --query id -o tsv` → record OBJECT_ID for AAD admin | GUID printed |
+
+### JSM Ops integration
+
+> The legacy OpsGenie "Azure Monitor" integration was discontinued with the
+> Atlassian → JSM migration. Use a generic API/Webhook integration in JSM
+> Ops; Azure Monitor sends Common Alert Schema, JSM ingests as alerts.
+
+In JSM:
+
+1. Jira → **Operations** → **Settings** → **Integrations** → **Add integration**
+2. Type: **API** (recommended — accepts arbitrary JSON without field mapping)
+   or **Webhook** (needs explicit field mapping; see operator guide).
+3. Name: `azure-monitor-shared`. Assign to your existing on-call team.
+4. Save → copy the URL (this is your `OPSGENIE_WEBHOOK_URL`):
+   ```
+   https://api.atlassian.com/jsm/ops/integration/v2/<integration-id>/<integration-key>
+   ```
+
+**Verify:**
+```bash
+curl -X POST "$OPSGENIE_WEBHOOK_URL" -H 'Content-Type: application/json' \
+     -d '{"data":{"essentials":{"alertRule":"smoke-test","alertId":"smoke-001","monitorCondition":"Fired","severity":"Sev3"}}}'
+```
+Expect a new alert in JSM Ops with message `smoke-test` and alias `smoke-001`.
+Sending the same payload twice → JSM dedupes via `alias` (one alert, not two).
 
 ### 2.2 Bicep deploy (~10 min)
 
@@ -396,6 +421,8 @@ cheat-sheet — see the **Run Book** in Obsidian:
 | `setup-postgres.sh: PG_HOST must be set` | Forgot to export the FQDN | `export PG_HOST=alpenland-observability-pg.postgres.database.azure.com` |
 | `deploy.sh: PG_ADMIN_PASSWORD must be set` | provisionPostgres=true but no admin pwd in env | `export PG_ADMIN_PASSWORD=$(openssl rand -base64 32)` and stash it in KV |
 | Bicep `if (provisionPostgres)` won't compile | Bicep CLI < 0.30 | `az bicep upgrade` |
+| JSM Ops shows no alert though Action Group fired | wrong integration URL OR field-mapping broken | re-test with `curl` → check JSM → Settings → Integrations → "Activity" tab. See Run Book IP-07. |
+| Where is the OpsGenie "Azure Monitor" integration? | Deprecated since JSM migration | Use generic JSM Ops API integration — see "JSM Ops integration" section above. |
 
 ---
 
