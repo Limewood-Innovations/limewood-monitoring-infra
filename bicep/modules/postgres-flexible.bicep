@@ -1,15 +1,13 @@
 // Azure Database for PostgreSQL Flexible Server — cold-path observability store.
 //
 // Provisions:
-//   * a Burstable-tier Flexible Server (small for dev, scaled for prod)
+//   * a Flexible Server (Burstable for dev/stage, General Purpose for prod)
 //   * the `observability` database
-//   * AAD admin (the deploying principal) so DBAs don't need passwords
-//   * a SQL admin login (for legacy / non-AAD tools)
+//   * a SQL admin login (no AAD — pure SQL auth, simpler operationally)
 //   * firewall rule "AllowAllAzure" to let Azure-hosted tools connect
 //
-// Schema is created at first use by `limewood-observability-db`'s
-// `connector.run_migrations()` (or manually via the SQL in
-// `001_init_postgres.sql`).
+// Application-level roles (`obs_writer`, `obs_reader`) and the schema are
+// created post-deploy by `scripts/setup-postgres.sh`.
 
 @description('PostgreSQL server name (must be globally unique in *.postgres.database.azure.com).')
 param name string
@@ -46,12 +44,6 @@ param adminUsername string
 @secure()
 param adminPassword string
 
-@description('AAD object id of the deploying user/SP — becomes the AAD admin.')
-param aadAdminObjectId string
-
-@description('AAD principal display name (just for the portal).')
-param aadAdminPrincipalName string
-
 resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: name
   location: location
@@ -75,24 +67,13 @@ resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
       mode: env == 'prod' ? 'ZoneRedundant' : 'Disabled'
     }
     authConfig: {
-      activeDirectoryAuth: 'Enabled'
+      activeDirectoryAuth: 'Disabled'
       passwordAuth: 'Enabled'
-      tenantId: subscription().tenantId
     }
   }
   tags: {
     system: 'observability'
     env: env
-  }
-}
-
-resource aadAdmin 'Microsoft.DBforPostgreSQL/flexibleServers/administrators@2024-08-01' = {
-  parent: pg
-  name: aadAdminObjectId
-  properties: {
-    principalType: 'ServicePrincipal'
-    principalName: aadAdminPrincipalName
-    tenantId: subscription().tenantId
   }
 }
 

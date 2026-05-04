@@ -9,10 +9,14 @@
 #   ./scripts/deploy.sh            # deploy
 #   ./scripts/deploy.sh --whatif   # dry-run, show diff only
 #
-# Required env vars only when provisionPostgres=true (the default):
+# Required env vars when provisionPostgres=true (the default):
+#   PG_ADMIN_USERNAME       — defaults to 'pgadmin' if unset
 #   PG_ADMIN_PASSWORD       — generate with `openssl rand -base64 32`
-#   PG_AAD_ADMIN_OBJECT_ID  — `az ad signed-in-user show --query id -o tsv`
-#   PG_AAD_ADMIN_NAME       — display name (cosmetic)
+#
+# `setup-postgres.sh` (run after this) needs additionally:
+#   OBS_WRITER_USERNAME / OBS_WRITER_PASSWORD
+#   OBS_READER_USERNAME / OBS_READER_PASSWORD
+# (also defined in .env.example so a single `source .env` covers all of them.)
 
 set -euo pipefail
 
@@ -29,8 +33,6 @@ deployment_name="alpenland-obs-$(date +%Y%m%d%H%M%S)"
 # helpful message instead of letting Bicep complain mid-deploy.
 if grep -qE '^param +provisionPostgres += +true\b' "${params}"; then
     : "${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD must be set when provisioning Postgres (openssl rand -base64 32)}"
-    : "${PG_AAD_ADMIN_OBJECT_ID:?PG_AAD_ADMIN_OBJECT_ID must be set (az ad signed-in-user show --query id -o tsv)}"
-    : "${PG_AAD_ADMIN_NAME:?PG_AAD_ADMIN_NAME must be set (display name of the AAD admin)}"
 fi
 
 echo "→ Deploying observability stack (mode=${mode})"

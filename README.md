@@ -99,8 +99,8 @@ proceed until the previous step passes its check.
 |---|--------|--------|
 | 1 | `az login --tenant <alpenland-tenant>` + `az account set --subscription <sub>` | `az account show` shows the right subscription |
 | 2 | `az provider register --namespace Microsoft.Insights` (and `Microsoft.OperationalInsights`, `Microsoft.DBforPostgreSQL`) | `az provider show -n <ns> --query registrationState` returns `Registered` |
-| 3 | Generate Postgres admin password: `openssl rand -base64 32` | safe spot for the value |
-| 4 | `az ad signed-in-user show --query id -o tsv` → record OBJECT_ID for AAD admin | GUID printed |
+| 3 | Generate three Postgres passwords (admin / obs_writer / obs_reader): each via `openssl rand -base64 32` | three values stashed safely (will go into `.env` next) |
+| 4 | `cp .env.example .env` and paste the three passwords (and adjust usernames if needed) | `.env` has 3 non-placeholder passwords |
 
 ### 2.2 Bicep deploy (~10 min)
 
@@ -117,13 +117,18 @@ set -a; source .env; set +a   # exports vars to current shell
 
 #### Required env vars
 
-| Variable | Required when | Source |
-|----------|---------------|--------|
-| `PG_ADMIN_PASSWORD` | `provisionPostgres=true` (default) | step 3 |
-| `PG_AAD_ADMIN_OBJECT_ID` | `provisionPostgres=true` | step 4 |
-| `PG_AAD_ADMIN_NAME` | `provisionPostgres=true` | your display name |
+| Variable | Used by | Default |
+|----------|---------|---------|
+| `PG_ADMIN_USERNAME` | `deploy.sh` (server admin login) | `pgadmin` |
+| `PG_ADMIN_PASSWORD` | `deploy.sh` + `setup-postgres.sh` | (required, no default) |
+| `OBS_WRITER_USERNAME` | `setup-postgres.sh` | `obs_writer` |
+| `OBS_WRITER_PASSWORD` | `setup-postgres.sh` | (required, no default) |
+| `OBS_READER_USERNAME` | `setup-postgres.sh` | `obs_reader` |
+| `OBS_READER_PASSWORD` | `setup-postgres.sh` | (required, no default) |
+| `PG_HOST` | `setup-postgres.sh` | (filled in from deploy output, see §2.3) |
 
-deploy.sh fails fast with a helpful message if any required var is missing.
+deploy.sh fails fast if `PG_ADMIN_PASSWORD` is missing while
+`provisionPostgres = true`.
 
 **Verify:**
 ```bash
@@ -136,24 +141,30 @@ az postgres flexible-server show -n alpenland-observability-pg \
 
 ### 2.3 Bootstrap Postgres (~2 min)
 
-Bicep created the server + an empty `observability` database. The schema,
-roles, and migration are applied via:
+Bicep created the server + an empty `observability` database. The schema
+and the application roles are then created via:
 
 ```bash
-export PG_HOST="alpenland-observability-pg.postgres.database.azure.com"  # POSTGRESFQDN output
-export PG_ADMIN_PASSWORD="$PG_ADMIN_PASSWORD"   # same value used in deploy
+# Add PG_HOST to .env (or export here) — it's the POSTGRESFQDN deploy output
+echo "PG_HOST=alpenland-observability-pg.postgres.database.azure.com" >> .env
+set -a; source .env; set +a   # re-export
 ./scripts/setup-postgres.sh
 ```
 
-The script is **idempotent** — safe to re-run. It:
+The script is **idempotent** — safe to re-run. Re-running after rotating a
+password applies the new password (`ALTER ROLE`). It:
 
 1. Creates the `observability` schema
-2. Creates `obs_writer` (least-privilege, no DDL) and `obs_reader` roles —
-   passwords are auto-generated and printed at the end
-3. Pulls the latest migration from
+2. Creates the `obs_writer` role (least-privilege: SELECT/INSERT/UPDATE on
+   the schema, no DDL) using `OBS_WRITER_USERNAME` / `OBS_WRITER_PASSWORD`
+   from `.env`
+3. Creates the `obs_reader` role (read-only) using `OBS_READER_USERNAME` /
+   `OBS_READER_PASSWORD` from `.env`
+4. Pulls the latest migration from
    [limewood-observability-db@main](https://github.com/Limewood-Innovations/limewood-observability-db/blob/main/src/limewood_observability_db/migrations/001_init_postgres.sql)
    and applies it
-4. Prints two ready-to-paste SQLAlchemy URLs (writer + reader)
+5. Prints three ready-to-paste `az keyvault secret set` commands (admin,
+   writer, reader URLs)
 
 **Verify:**
 ```sql
@@ -164,15 +175,17 @@ psql "host=$PG_HOST user=pgadmin dbname=observability sslmode=require" \
 
 ### 2.4 Stash secrets in KeyVault
 
+`setup-postgres.sh` printed three `az keyvault secret set` commands at the
+end of §2.3 — run them now (adjust the KV name to your shared KeyVault):
+
 ```bash
 KV="alpenland-secrets-shared-kv"   # adjust to your shared KV name
 
-# AppInsights connection string (from 2.2 output)
+# Postgres URLs (paste from setup-postgres.sh output)
 az keyvault secret set --vault-name $KV \
-    --name appinsights-connection-string \
-    --value "InstrumentationKey=...;IngestionEndpoint=..."
+    --name observability-pg-admin-url \
+    --value "postgresql+psycopg://pgadmin:..."
 
-# Postgres URLs (printed at the end of 2.3)
 az keyvault secret set --vault-name $KV \
     --name observability-sql-url \
     --value "postgresql+psycopg://obs_writer:..."
@@ -180,11 +193,20 @@ az keyvault secret set --vault-name $KV \
 az keyvault secret set --vault-name $KV \
     --name observability-sql-url-readonly \
     --value "postgresql+psycopg://obs_reader:..."
+
+# AppInsights connection string (from §2.2 deploy output)
+az keyvault secret set --vault-name $KV \
+    --name appinsights-connection-string \
+    --value "InstrumentationKey=...;IngestionEndpoint=..."
 ```
 
 If your KV is named differently — every Alpenland project has its own KV
 today — pick the one your tools already read from, OR create a new shared
 one for cross-tool secrets.
+
+**After this step you can clear the passwords from `.env`** — tools
+resolve them from KV at runtime via `@Microsoft.KeyVault(SecretUri=...)`
+references.
 
 ### 2.5 Wire one tool (doc_search as the pilot)
 

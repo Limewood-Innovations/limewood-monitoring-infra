@@ -48,12 +48,6 @@ param pgAdminUsername string = 'pgadmin'
 @secure()
 param pgAdminPassword string = ''
 
-@description('Object ID of the AAD principal that becomes Postgres AAD admin.')
-param pgAadAdminObjectId string = ''
-
-@description('Display name for the AAD admin (cosmetic).')
-param pgAadAdminPrincipalName string = ''
-
 // ---------------------------------------------------------------------------
 // Resource group
 // ---------------------------------------------------------------------------
@@ -107,8 +101,6 @@ module postgres 'modules/postgres-flexible.bicep' = if (provisionPostgres) {
     backupRetentionDays: pgBackupRetentionDays
     adminUsername: pgAdminUsername
     adminPassword: pgAdminPassword
-    aadAdminObjectId: pgAadAdminObjectId
-    aadAdminPrincipalName: pgAadAdminPrincipalName
   }
 }
 
