@@ -1,5 +1,7 @@
 # alpenland-monitoring-infra
 
+[![ci](https://github.com/Limewood-Innovations/alpenland-monitoring-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/Limewood-Innovations/alpenland-monitoring-infra/actions/workflows/ci.yml)
+
 Bicep IaC for the shared Alpenland observability stack:
 
 - **Log Analytics Workspace** (one per environment) — backing store for traces,

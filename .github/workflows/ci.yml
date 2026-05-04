@@ -1,0 +1,55 @@
+name: ci
+
+# Validates Bicep templates compile cleanly and the deploy script is shellcheck-clean.
+# No Azure auth needed — `az bicep build` is a pure local syntax/type check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bicep:
+    name: Bicep build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: |
+          curl -sLO https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep-linux-x64
+          sudo mv bicep-linux-x64 /usr/local/bin/bicep
+          bicep --version
+
+      - name: Build main.bicep (compile + lint)
+        run: bicep build bicep/main.bicep --outdir /tmp/bicep-out
+
+      - name: Build all module bicep files
+        run: |
+          for f in bicep/modules/*.bicep; do
+            echo "→ building $f"
+            bicep build "$f" --outdir /tmp/bicep-out
+          done
+
+      - name: Lint bicepparam files
+        run: |
+          for f in bicep/parameters/*.bicepparam; do
+            echo "→ checking $f"
+            bicep build-params "$f" --outfile /tmp/bicep-out/$(basename "$f" .bicepparam).parameters.json
+          done
+
+  shellcheck:
+    name: ShellCheck deploy script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck on scripts/
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          severity: warning
+          scandir: scripts
