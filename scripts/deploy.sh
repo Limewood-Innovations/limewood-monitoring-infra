@@ -1,32 +1,37 @@
 #!/usr/bin/env bash
 # Deploy the limewood-monitoring-infra Bicep stack.
-# Usage:  ./scripts/deploy.sh <env>          # env in {dev, stage, prod}
-#         ./scripts/deploy.sh <env> --whatif # dry-run (preview only)
 #
-# Requires:  az CLI logged in to the Alpenland tenant
-#            OPSGENIE_WEBHOOK_URL env var set
+# Single shared deployment — one resource group + one of each component for
+# all envs (dev/stage/prod). See README "Bring Your Own Postgres" for the
+# DB setup on Alpenland's existing Postgres server.
+#
+# Usage:
+#   ./scripts/deploy.sh            # deploy
+#   ./scripts/deploy.sh --whatif   # dry-run, show diff only
+#
+# Required env vars (always):
+#   OPSGENIE_WEBHOOK_URL    — Azure Monitor → OpsGenie webhook
+#
+# Required env vars only when provisionPostgres=true (default false):
+#   PG_ADMIN_PASSWORD       — generate with `openssl rand -base64 32`
+#   PG_AAD_ADMIN_OBJECT_ID  — `az ad signed-in-user show --query id -o tsv`
+#   PG_AAD_ADMIN_NAME       — display name (cosmetic)
+
 set -euo pipefail
 
-env="${1:-}"
-mode="${2:-create}"
-
-if [[ -z "${env}" || ! "${env}" =~ ^(dev|stage|prod)$ ]]; then
-    echo "usage: $0 <dev|stage|prod> [--whatif]" >&2
-    exit 1
-fi
+mode="${1:-create}"
 
 : "${OPSGENIE_WEBHOOK_URL:?OPSGENIE_WEBHOOK_URL must be set}"
-: "${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD must be set (Postgres SQL admin)}"
-: "${PG_AAD_ADMIN_OBJECT_ID:?PG_AAD_ADMIN_OBJECT_ID must be set (the AAD principal that becomes Postgres AAD admin)}"
-: "${PG_AAD_ADMIN_NAME:?PG_AAD_ADMIN_NAME must be set (display name of the AAD admin)}"
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 template="${repo_root}/bicep/main.bicep"
-params="${repo_root}/bicep/parameters/${env}.bicepparam"
+params="${repo_root}/bicep/parameters/main.bicepparam"
 location="westeurope"
-deployment_name="alpenland-obs-${env}-$(date +%Y%m%d%H%M%S)"
+deployment_name="alpenland-obs-$(date +%Y%m%d%H%M%S)"
 
-echo "→ Deploying ${env} (mode=${mode}) using ${params}"
+echo "→ Deploying observability stack (mode=${mode})"
+echo "  template: ${template}"
+echo "  params:   ${params}"
 
 if [[ "${mode}" == "--whatif" ]]; then
     az deployment sub what-if \
@@ -54,5 +59,12 @@ jq -r '
 ' "/tmp/${deployment_name}.json"
 
 echo
-echo "Paste APPINSIGHTS_CONNECTION_STRING into the consuming tool's .env"
-echo "(e.g. doc_search/.env, hermes/.env, …)."
+echo "Next steps:"
+echo "  1. Stash APPINSIGHTS_CONNECTION_STRING in the shared KeyVault as"
+echo "     secret 'appinsights-connection-string'."
+echo "  2. If POSTGRES_PROVISIONED = false, run the BYO-Postgres setup from"
+echo "     the README to create the observability DB + obs_writer role on"
+echo "     your existing Postgres, then stash the URL in KeyVault as"
+echo "     'observability-sql-url'."
+echo "  3. Each tool (doc_search, hermes, …) sets the same two ENV vars in"
+echo "     dev/stage/prod — only APP_ENV differs."
